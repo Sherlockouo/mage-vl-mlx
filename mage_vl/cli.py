@@ -38,14 +38,19 @@ def main() -> int:
 
     engine = MageVLEngine(args.model)
     if args.text:
-        res = engine.generate_text(args.text, max_tokens=args.max_tokens)
+        res = engine.run_on_worker(
+            lambda: engine.generate_text(args.text, max_tokens=args.max_tokens))
     elif args.video:
-        prep = engine.preprocess_video(args.video, num_frames=args.frames,
-                                       max_pixels=args.max_pixels)
-        res = engine.summarize(prep, args.prompt, max_tokens=args.max_tokens)
+        def job():
+            prep = engine.preprocess_video(args.video, num_frames=args.frames,
+                                           max_pixels=args.max_pixels)
+            return engine.summarize(prep, args.prompt, max_tokens=args.max_tokens)
+        res = engine.run_on_worker(job)
     elif args.image:
-        res = engine.generate_image(args.image, args.prompt, max_tokens=args.max_tokens,
-                                    max_pixels=args.max_pixels)
+        res = engine.run_on_worker(
+            lambda: engine.generate_image(args.image, args.prompt,
+                                          max_tokens=args.max_tokens,
+                                          max_pixels=args.max_pixels))
     else:
         ap.error("one of --image / --video / --text is required")
         return 1

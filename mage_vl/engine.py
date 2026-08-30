@@ -473,6 +473,23 @@ class MageVLEngine:
     # ------------------------------------------------------------ single frame
     # Public API — blocks on the worker.
 
+    def run_on_worker(self, fn, timeout: float = 900):
+        """Run ``fn()`` on the inference worker thread and wait for the result.
+
+        MLX requires lazy arrays to be created and evaluated on the thread that
+        owns the GPU stream — anything touching the model must go through this
+        (or be submitted via :meth:`submit`)."""
+        fut = _Future()
+
+        def task():
+            try:
+                fut.set_result(fn())
+            except Exception as exc:  # noqa: BLE001
+                fut.set_exception(exc)
+
+        self.submit(task)
+        return fut.result(timeout=timeout)
+
     def describe_frame(self, image_bytes: bytes, prompt: str = "用一句话描述当前屏幕画面。",
                        max_tokens: int = 80, max_pixels: Optional[int] = None) -> dict:
         """Analyze a single frame; blocks until done (compat API)."""
