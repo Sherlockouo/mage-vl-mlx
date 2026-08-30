@@ -1,0 +1,11 @@
+mage-vl-mlx is a derivative inference port of
+  microsoft/Mage-VL  (https://huggingface.co/microsoft/Mage-VL, Apache-2.0)
+and reuses the Qwen3 language-model implementation from
+  mlx-vlm           (https://github.com/Blaizzy/mlx-vlm, Apache-2.0)
+via mlx_vlm.models.qwen3.
+
+Model weights are NOT included — convert them locally from the upstream
+Apache-2.0 checkpoint (see scripts/convert.py).
+
+web/demo-sintel.mp4 is an excerpt of "Sintel" (© Blender Foundation,
+CC-BY 3.0) used as a demo clip.

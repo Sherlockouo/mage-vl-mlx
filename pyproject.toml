@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mage-vl-mlx"
+version = "0.1.0"
+description = "Optimized MLX port of microsoft/Mage-VL (5B image/video VLM) for Apple Silicon — compiled ViT, streaming decode, repetition-guarded generation"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+dependencies = [
+  "mlx>=0.32",
+  "mlx-lm>=0.31",
+  "mlx-vlm>=0.6.8",
+  "numpy",
+  "pillow",
+  "jinja2",
+  "tokenizers",
+  "safetensors",
+]
+
+[project.optional-dependencies]
+server = ["fastapi>=0.110", "uvicorn>=0.27"]
+video = ["av"]
+
+[project.scripts]
+mage-vl = "mage_vl.cli:main"
+
+[tool.setuptools]
+packages = ["mage_vl"]
+
+[tool.setuptools.package-data]
+mage_vl = ["py.typed"]

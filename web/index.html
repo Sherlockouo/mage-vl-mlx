@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>mage-vl-mlx · 实时识别</title>
+<style>
+  :root { --bg:#0d1117; --bg2:#11161f; --panel:#161b26; --bd:#232a37; --tx:#e6e9ef;
+          --mut:#8b95a7; --acc:#6c8cff; --ok:#3ddc84; --warn:#ffb454; --dgr:#ff6b6b; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body,#app { height:100%; }
+  body { background:var(--bg); color:var(--tx); font:14px/1.6 -apple-system,"PingFang SC",system-ui,sans-serif; }
+  #app { display:flex; overflow:hidden; }
+  aside { width:360px; flex-shrink:0; background:var(--panel); border-right:1px solid var(--bd);
+          padding:16px; overflow-y:auto; display:flex; flex-direction:column; gap:14px; }
+  h1 { font-size:16px; } .sub { font-size:12px; color:var(--mut); }
+  video { width:100%; aspect-ratio:16/9; object-fit:cover; background:#000;
+          border-radius:10px; border:1px solid var(--bd); }
+  .row { display:flex; gap:8px; } .row > * { flex:1; }
+  button { background:var(--bg2); color:var(--tx); border:1px solid var(--bd); border-radius:8px;
+           padding:8px 10px; cursor:pointer; font-size:13px; }
+  button.primary { background:#1d2740; border-color:var(--acc); }
+  button:disabled { opacity:.45; cursor:default; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { font-family:ui-monospace,Menlo,monospace; font-size:11px; color:var(--mut);
+          border:1px solid var(--bd); padding:2px 8px; border-radius:20px; }
+  .chip.ok { color:var(--ok); border-color:#1f5c40; }
+  label { font-size:12px; color:var(--mut); display:block; margin-bottom:4px; }
+  textarea, input[type=number], select { width:100%; background:var(--bg2); color:var(--tx);
+      border:1px solid var(--bd); border-radius:8px; padding:8px; font:inherit; }
+  main { position:relative; flex:1; min-width:0; overflow:hidden; }
+  #feed { height:100%; overflow-y:auto; padding:16px; columns:2; column-gap:16px; }
+  .card { break-inside:avoid; margin-bottom:16px; background:var(--panel); border:1px solid var(--bd);
+          border-radius:12px; overflow:hidden; }
+  .card img { width:100%; display:block; }
+  .card .b { padding:10px 12px; font-size:13px; white-space:pre-wrap; word-break:break-word; }
+  .card .m { padding:0 12px 10px; display:flex; flex-wrap:wrap; gap:5px; }
+  .card .m span { font-family:ui-monospace,Menlo,monospace; font-size:10.5px; color:var(--mut);
+                 border:1px solid var(--bd); padding:1px 7px; border-radius:12px; }
+  .card.warn { border-color:var(--warn); } .card.emg { border-color:var(--dgr); }
+  .m .sev-w { color:var(--warn); } .m .sev-e { color:var(--dgr); }
+  .toolbar { position:absolute; top:12px; right:16px; z-index:5; display:flex; gap:8px; }
+  .caret { display:inline-block; width:8px; height:15px; background:var(--acc);
+           vertical-align:-2px; animation:blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+  .empty { height:100%; display:grid; place-items:center; color:var(--mut); text-align:center; }
+  /* history overlay */
+  #hist { position:absolute; inset:0; z-index:30; background:rgba(13,17,23,.97);
+          display:none; flex-direction:column; }
+  #hist.open { display:flex; }
+  #hist header { display:flex; justify-content:space-between; align-items:center;
+                 padding:12px 16px; border-bottom:1px solid var(--bd); }
+  #hist .body { display:flex; flex:1; min-height:0; }
+  #sess-list { width:260px; border-right:1px solid var(--bd); overflow-y:auto; padding:10px; }
+  .sess { border:1px solid var(--bd); border-radius:10px; padding:8px 10px; margin-bottom:8px;
+          cursor:pointer; font-size:12.5px; }
+  .sess:hover { border-color:var(--acc); }
+  .sess .meta { color:var(--mut); font-family:ui-monospace,Menlo,monospace; font-size:11px; }
+  #hist-frames { flex:1; overflow-y:auto; padding:16px; columns:2; column-gap:16px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside>
+    <div>
+      <h1>mage-vl-mlx 实时识别</h1>
+      <p class="sub">MLX 优化推理 · 帧进 → 描述出</p>
+    </div>
+    <video id="v" muted playsinline></video>
+    <div class="row">
+      <button data-src="camera">摄像头</button>
+      <button data-src="screen">屏幕</button>
+      <button data-src="demo">演示</button>
+      <button data-src="file">文件</button>
+    </div>
+    <input id="file" type="file" accept="video/*" hidden>
+    <button id="run" class="primary" disabled>等待服务…</button>
+    <div class="chips">
+      <span class="chip" id="conn">未连接</span>
+      <span class="chip" id="fps">— fps</span>
+      <span class="chip" id="e2e">端到端 —</span>
+      <span class="chip" id="rec" style="display:none">● REC 0</span>
+    </div>
+    <div>
+      <label for="interval">识别间隔 (秒)</label>
+      <input id="interval" type="number" value="1" min="0.5" max="60" step="0.5">
+    </div>
+    <div>
+      <label for="quality">清晰度</label>
+      <select id="quality">
+        <option value="230400">流畅 · 480px</option>
+        <option value="518400">清晰 · 720px</option>
+        <option value="2073600" selected>高清 · 1080px(小字/行情)</option>
+      </select>
+    </div>
+    <div>
+      <label for="prompt">提示词</label>
+      <textarea id="prompt" rows="3">用一到两句话描述当前画面。</textarea>
+    </div>
+  </aside>
+  <main>
+    <div class="toolbar">
+      <button id="clear">清屏</button>
+      <button id="hist-btn">🕘 历史</button>
+    </div>
+    <div id="feed"><div class="empty"><p>左侧选择视频源并开始<br>识别结果以瀑布流展示,历史自动入库</p></div></div>
+    <div id="hist">
+      <header>
+        <b>识别历史</b>
+        <button id="hist-close">✕ 关闭</button>
+      </header>
+      <div class="body">
+        <div id="sess-list"></div>
+        <div id="hist-frames"></div>
+      </div>
+    </div>
+  </main>
+</div>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const S = { ws:null, ready:false, running:false, hasSrc:false, src:null, stream:null,
+            objUrl:null, timer:null, hint:null, fid:0, cur:-1, minMs:1000, px:2073600,
+            segs:new Map(), rec:null, done:0, t0:performance.now(), e2e:null };
+const cards = new Map();
+
+function chip(id, txt, ok) { const e=$(id); e.textContent=txt; e.classList.toggle("ok", !!ok); }
+
+/* ---------------- websocket + heartbeat ---------------- */
+function sendCfg() { S.ws?.send(JSON.stringify({ op:"config", prompt:$("prompt").value.trim()||"描述当前画面。", max_tokens:8000, max_pixels:S.px })); }
+function connect() {
+  const ws = new WebSocket(`${location.protocol==="https:"?"wss":"ws"}://${location.host}/ws/stream`);
+  S.ws = ws; let last = Date.now();
+  const hb = setInterval(() => {
+    if (ws.readyState === 1) {
+      if (Date.now()-last > 20000) { ws.close(); return; }
+      ws.send(JSON.stringify({op:"ping"}));
+    }
+  }, 10000);
+  ws.onopen = () => { S.ready = true; chip("conn","已连接",true); sendCfg(); refresh(); if (S.running) ws.send(JSON.stringify({op:"run_start"})); };
+  ws.onclose = () => { clearInterval(hb); S.ready = false; chip("conn","未连接"); refresh();
+                       if (S.running) setRun(false); setTimeout(connect, 2000); };
+  ws.onmessage = (ev) => {
+    last = Date.now();
+    let m; try { m = JSON.parse(ev.data); } catch { return; }
+    if (m.type === "seg") {
+      S.segs.set(m.fid, (S.segs.get(m.fid) ?? "") + m.text);
+    } else if (m.type === "result") {
+      S.hint = m.fps_hint_ms; S.done++;
+      S.e2e = S.e2e == null ? m.timings.total_ms : S.e2e*0.8 + m.timings.total_ms*0.2;
+      if (typeof m.rec_saved === "number") { S.rec = m.rec_saved; chip("rec", `● REC ${m.rec_saved}`, true); }
+      const c = cards.get(m.fid);
+      if (c) {
+        c.querySelector(".b").textContent = m.text;
+        c.querySelector(".caret")?.remove();
+        const sev = m.severity || "无";
+        if (sev === "紧急") { c.classList.add("emg"); }
+        else if (sev === "注意") { c.classList.add("warn"); }
+        const meta = c.querySelector(".m");
+        meta.innerHTML = "";
+        meta.appendChild(chipEl(new Date(Number(c.dataset.ts)).toLocaleTimeString("zh-CN",{hour12:false})));
+        meta.appendChild(chipEl(`${Math.round(m.timings.total_ms)}ms`));
+        meta.appendChild(chipEl(`${m.tokens}tok · ${m.tokens_per_s} tok/s`));
+        if (m.truncated) meta.appendChild(chipEl("⚠ 已达长度上限"));
+        if (sev !== "无") { const s = chipEl(sev === "紧急" ? "🔴 紧急" : "🟡 注意"); s.className = sev === "紧急" ? "sev-e" : "sev-w"; meta.appendChild(s); }
+      }
+      const wall = (performance.now()-S.t0)/1000;
+      $("fps").textContent = `${(S.done/wall).toFixed(2)} fps`;
+      $("e2e").textContent = `端到端 ${Math.round(S.e2e)}ms`;
+    } else if (m.type === "session") {
+      if (m.state === "recording") { S.rec = 0; chip("rec","● REC 0",true); $("rec").style.display=""; }
+      else { S.rec = null; $("rec").style.display="none"; }
+    }
+  };
+}
+function chipEl(t) { const s = document.createElement("span"); s.textContent = t; return s; }
+
+/* ---------------- video sources ---------------- */
+async function playWhenReady(v, t=4000) {
+  if (!v.paused && v.readyState >= 2) return true;
+  await v.play().catch(() => {});
+  await new Promise(r => { const h=()=>{v.removeEventListener("canplay",h);r();};
+    v.addEventListener("canplay",h); setTimeout(r,t); });
+  await v.play().catch(() => {});
+  return !v.paused;
+}
+function stopSrc() {
+  S.stream?.getTracks().forEach(t=>t.stop()); S.stream=null;
+  if (S.objUrl) { URL.revokeObjectURL(S.objUrl); S.objUrl=null; }
+  const v=$("v"); try{v.pause();}catch{} v.removeAttribute("src"); v.srcObject=null;
+  S.hasSrc=false; refresh();
+}
+async function setSrc(kind, file) {
+  if (S.running) setRun(false);
+  stopSrc(); S.src = kind; const v = $("v");
+  if (kind==="camera") { S.stream = await navigator.mediaDevices.getUserMedia({video:{width:1280,height:720},audio:false});
+    v.srcObject=S.stream; S.hasSrc = await playWhenReady(v); }
+  else if (kind==="screen") { S.stream = await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});
+    S.stream.getVideoTracks()[0].addEventListener("ended",()=>{ if(S.running) setRun(false); S.hasSrc=false; refresh(); });
+    v.srcObject=S.stream; S.hasSrc = await playWhenReady(v); }
+  else if (kind==="demo") { v.srcObject=null; v.src="/demo-sintel.mp4"; v.loop=true; v.muted=true; S.hasSrc = await playWhenReady(v); }
+  else if (kind==="file" && file) { S.objUrl = URL.createObjectURL(file); v.srcObject=null; v.src=S.objUrl; v.loop=true; v.muted=true; S.hasSrc = await playWhenReady(v); }
+  refresh();
+}
+
+/* ---------------- sampling ---------------- */
+const cv = document.createElement("canvas"), tc = document.createElement("canvas");
+tc.width=240; tc.height=135;
+function grab() {
+  const v=$("v"); if (!v.videoWidth) return null;
+  const s = Math.min(1, Math.sqrt(S.px/(v.videoWidth*v.videoHeight)));
+  cv.width=Math.max(16,Math.round(v.videoWidth*s)); cv.height=Math.max(16,Math.round(v.videoHeight*s));
+  cv.getContext("2d").drawImage(v,0,0,cv.width,cv.height);
+  return new Promise(r => cv.toBlob(r, "image/jpeg", 0.72));
+}
+async function sample() {
+  const blob = await grab(); if (!blob) return;
+  const fid = S.fid++;
+  const feed = $("feed"); if (feed.querySelector(".empty")) feed.innerHTML="";
+  tc.getContext("2d").drawImage(cv,0,0,tc.width,tc.height);
+  const div = document.createElement("div");
+  div.className="card"; div.dataset.fid=fid; div.dataset.ts=Date.now();
+  div.innerHTML = `<img src="${tc.toDataURL("image/jpeg",0.5)}"><div class="b">识别中…<span class="caret"></span></div><div class="m"></div>`;
+  feed.prepend(div); cards.set(fid, div);
+  while (feed.children.length > 40) { const last = feed.lastChild; cards.delete(+last.dataset.fid); last.remove(); }
+  S.ws.send(await blob.arrayBuffer());
+}
+function schedule() {
+  if (!S.running) return;
+  const delay = Math.max(S.minMs, S.hint ?? 0);
+  S.timer = setTimeout(async () => { if (!S.running) return; schedule(); try { await sample(); } catch(e){console.warn(e);} }, delay);
+}
+function setRun(on) {
+  S.running = on; refresh();
+  if (on) { sendCfg(); S.ws.send(JSON.stringify({op:"run_start"})); S.t0=performance.now(); S.done=0; schedule(); }
+  else { clearTimeout(S.timer); S.ws.send(JSON.stringify({op:"run_stop"})); }
+}
+function refresh() {
+  const b = $("run");
+  b.disabled = !S.ready || (!S.running && !S.hasSrc);
+  b.textContent = S.running ? "⏸ 暂停" : S.ready ? (S.hasSrc?"▶ 开始识别":"选择视频源") : "等待服务…";
+}
+
+/* ---------------- history ---------------- */
+async function openHist() {
+  $("hist").classList.add("open");
+  const r = await fetch("/api/history/sessions"); const list = await r.json();
+  const box = $("sess-list"); box.innerHTML = list.length ? "" : '<p class="sub">还没有会话</p>';
+  for (const s of list) {
+    const d = document.createElement("div"); d.className="sess";
+    d.innerHTML = `<div>${s.title}</div><div class="meta">${s.frame_count}帧 ${s.alert_count?s.alert_count+"警 ":""}${new Date(s.created*1000).toLocaleString("zh-CN",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}</div>`;
+    d.onclick = async () => {
+      const det = await (await fetch(`/api/history/sessions/${s.id}`)).json();
+      const hf = $("hist-frames"); hf.innerHTML = "";
+      for (const f of (det.frames||[])) {
+        const div = document.createElement("div"); div.className="card";
+        div.innerHTML = `<img loading="lazy" src="${f.thumb_url}"><div class="b"></div>
+          <div class="m"><span>${new Date(f.ts*1000).toLocaleTimeString("zh-CN",{hour12:false})}</span>
+          <span>${Math.round(f.timings.total_ms||0)}ms</span><span>${f.tokens}tok</span>
+          ${f.severity!=="无"?`<span class="${f.severity==="紧急"?"sev-e":"sev-w"}">${f.severity==="紧急"?"🔴 紧急":"🟡 注意"}</span>`:""}</div>`;
+        div.querySelector(".b").textContent = f.description;
+        hf.appendChild(div);
+      }
+    };
+    box.appendChild(d);
+  }
+}
+
+/* ---------------- wiring ---------------- */
+document.querySelectorAll("button[data-src]").forEach(b =>
+  b.onclick = async () => { if (b.dataset.src==="file") $("file").click(); else setSrc(b.dataset.src); });
+$("file").onchange = (e) => { const f=e.target.files[0]; if (f) setSrc("file", f); };
+$("run").onclick = () => setRun(!S.running);
+$("clear").onclick = () => { $("feed").innerHTML = '<div class="empty"><p>已清屏(历史保留在库中)</p></div>'; cards.clear(); };
+$("hist-btn").onclick = openHist;
+$("hist-close").onclick = () => $("hist").classList.remove("open");
+$("interval").onchange = (e) => { const n=parseFloat(e.target.value); S.minMs = (Number.isFinite(n)?Math.max(0.5,Math.min(60,n)):1)*1000; };
+$("quality").onchange = (e) => { S.px = parseInt(e.target.value,10); sendCfg(); };
+$("prompt").onchange = sendCfg;
+
+/* seg 缓冲 120ms 批量渲染,避免逐 token 重排 */
+setInterval(() => {
+  if (!S.segs.size) return;
+  const buf = S.segs; S.segs = new Map();
+  for (const [fid, add] of buf) {
+    const c = cards.get(fid); if (!c) continue;
+    const b = c.querySelector(".b");
+    b.textContent = (b.textContent.replace(/识别中…?/,"")) + add;
+  }
+}, 120);
+
+connect();
+refresh();
+</script>
+</body>
+</html>
